@@ -52,7 +52,7 @@ function renderReportCard({ summary, stitched, stitchedHold }) {
 
   const plateauTable = table(
     ['Changed setting', 'From', 'To', 'Return (all test windows)'],
-    [['<b>picked settings</b>', '', '', `<b>${pct(s.plateau.base.returnPct)}</b>`],
+    [['<b>picked settings</b>', '', 'as picked', `<b>${pct(s.plateau.base.returnPct)}</b>`],
       ...s.plateau.neighbors.map((n) => [esc(n.changed), n.from, n.to, `<span class="${n.returnPct > 0 ? 'up' : 'down'}">${pct(n.returnPct)}</span>`])],
   );
 
@@ -89,10 +89,11 @@ function renderReportCard({ summary, stitched, stitchedHold }) {
 <div class="verdict ${v.pass ? 'pass' : 'fail'}">${v.pass ? '✓' : '✗'} ${next}</div>
 <h2>Checks</h2>${checksTable}
 ${chart}
+<p class="note">Settings to deploy today (tuned on the most recent 90 days): <code>${esc(paramsText(s.candidate))}</code></p>
 <h2>1. Walk-forward windows</h2><p class="note">Each row: settings tuned on the 90 days before, then traded on the next 30 days without peeking. This is the most honest estimate of live results.</p>${foldsTable}
 <h2>2. By market type</h2><p class="note">Uptrend/downtrend = the benchmark moved more than 10% in that window.</p>${regimeTable}
-<h2>3. Stable settings</h2><p class="note">Candidate (tuned on the most recent window): <code>${esc(paramsText(s.candidate))}</code>. Each row nudges one setting a notch. If small nudges flip the result, the original was luck.</p>${plateauTable}
-<h2>4. Worse costs</h2><p class="note">Same candidate settings, across all test windows, with costs made deliberately worse.</p>${costTable}
+<h2>3. Stable settings</h2><p class="note">Each row nudges one setting a notch in every window's picked settings, then re-trades the unseen days. If small nudges flip the result, the original was luck.</p>${plateauTable}
+<h2>4. Worse costs</h2><p class="note">Each window's picked settings re-traded on its unseen days with costs made deliberately worse.</p>${costTable}
 <h2>5. Bad luck</h2><p class="note">The real out-of-sample days, reshuffled in 5-day blocks into thousands of alternate orders. Shows the range of outcomes the same edge could produce.</p>${mcHtml}
 <p class="note">Generated ${esc(s.generatedAt.slice(0, 16).replace('T', ' '))} UTC. Past results don't guarantee future ones.</p>
 </main><script>

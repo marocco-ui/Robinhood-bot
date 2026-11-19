@@ -108,20 +108,33 @@ async function main() {
   // ---------- candidate: what you'd deploy today = settings tuned on the latest window ----------
   const candidate = fixedParams || foldResults[foldResults.length - 1].params;
 
-  // Fixed settings across every test window (range re-centered at each window start, like
-  // re-centering a live grid monthly).
-  const rolling = async (params, opts = {}) => {
-    const rs = await Promise.all(folds.map((f) => run(params, { start: f.testStart, end: f.testEnd, ...opts })));
+  // Every check below runs each window's OWN picked settings on that window's unseen days.
+  // (Reusing the latest settings across all windows would test them on days they were tuned on.)
+  const walk = async (paramsFor, opts = {}) => {
+    const rs = await Promise.all(foldResults.map((f) => run(paramsFor(f), { start: f.testStart, end: f.testEnd, ...opts })));
     const bad = rs.find((r) => !r.ok);
     if (bad) return { returnPct: NaN, error: bad.error };
     return { returnPct: +compound(rs.map((r) => r.stats.returnPct)).toFixed(2), trades: rs.reduce((x, r) => x + (r.stats.trades || 0), 0) };
   };
 
-  // ---------- 3. plateau ----------
+  // ---------- 3. plateau: nudge one setting a notch in every window ----------
   process.stdout.write('  plateau ...');
-  const base = await rolling(candidate);
-  const nbs = neighbors(candidate, space);
-  const nbResults = await Promise.all(nbs.map(async (n) => ({ ...n, ...(await rolling(n.params)) })));
+  const base = await walk((f) => f.params);
+  const nudges = [];
+  for (const [k, values] of Object.entries(space)) {
+    if (values.length < 2) continue;
+    for (const dir of [-1, 1]) {
+      const shift = (p) => {
+        const i = values.indexOf(p[k]);
+        const j = i + dir;
+        return i === -1 || j < 0 || j >= values.length ? null : { ...p, [k]: values[j] };
+      };
+      // Skip a nudge that is impossible in every window (setting already at the edge everywhere).
+      if (!foldResults.some((f) => shift(f.params))) continue;
+      nudges.push({ changed: k, from: '', to: dir < 0 ? 'one notch lower' : 'one notch higher', paramsFor: (f) => shift(f.params) || f.params });
+    }
+  }
+  const nbResults = await Promise.all(nudges.map(async ({ paramsFor, ...n }) => ({ ...n, ...(await walk(paramsFor)) })));
   const plateau = { base, neighbors: nbResults.filter((n) => Number.isFinite(n.returnPct)) };
 
   // ---------- 4. worse costs ----------
@@ -136,7 +149,7 @@ async function main() {
     { key: 'fees', name: 'Fees +50%', opts: { costOverrides: { makerFeeBps: c.makerFeeBps * 1.5, takerFeeBps: c.takerFeeBps * 1.5 } } },
     { key: 'all', name: 'All of the above (spread +0.6%, harder fills, fees +50%)', opts: { fillBufferBps: 30, costOverrides: { spreadBps: c.spreadBps + 60, makerFeeBps: c.makerFeeBps * 1.5, takerFeeBps: c.takerFeeBps * 1.5 } } },
   ];
-  const costs = await Promise.all(scenarios.map(async (sc) => ({ key: sc.key, name: sc.name, ...(await rolling(candidate, sc.opts)) })));
+  const costs = await Promise.all(scenarios.map(async (sc) => ({ key: sc.key, name: sc.name, ...(await walk((f) => f.params, sc.opts)) })));
 
   // ---------- 5. bad luck ----------
   process.stdout.write(' monte carlo ...\n');

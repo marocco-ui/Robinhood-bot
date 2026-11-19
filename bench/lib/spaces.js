@@ -55,4 +55,19 @@ function randomCombos(space, n, seed = 1) {
   return out;
 }
 
-module.exports = { GRID_SPACE, MOMENTUM_SPACE, gridCombos, randomCombos };
+// Pickier momentum: only big, fast moves, with room to run. Robinhood's ~1.9% round trip means
+// a trade has to win well above 2% on average, so this trades rarely and holds longer.
+const MOMENTUM_SELECTIVE_SPACE = {
+  minVolumeAccel: [3, 4, 6, 8],
+  minBuyRatio: [0.6, 0.65, 0.7],
+  minChange1h: [3, 5, 8],
+  maxChange1h: [25, 40],
+  breakoutLookbackMin: [240, 720, 1440],
+  stopLossPct: [-8, -12, -18, -25],
+  takeProfitPct: [20, 30, 50, 100],
+  trailActivatePct: [12, 20, 30],
+  trailPct: [8, 12, 15, 20],
+  maxHoldHours: [24, 48, 96, 168],
+  minScore: [60, 75, 85],
+};
+module.exports = { GRID_SPACE, MOMENTUM_SPACE, MOMENTUM_SELECTIVE_SPACE, gridCombos, randomCombos };

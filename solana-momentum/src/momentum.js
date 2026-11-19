@@ -18,7 +18,9 @@ class MomentumEngine {
     this.alerts = alerts || { send: async () => {} };
     this.now = now;
     this.sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
-    this.history = new PriceHistory();
+    // Keep enough history for the breakout lookback (at least 6h), or long lookbacks never pass.
+    const lookbackMs = ((cfg.signal && cfg.signal.breakoutLookbackMin) || 60) * 60000;
+    this.history = new PriceHistory({ maxAgeMs: Math.max(6 * HOUR, lookbackMs * 1.25) });
     this.state = state || {
       createdAt: new Date(now()).toISOString(),
       realizedPnl: 0,

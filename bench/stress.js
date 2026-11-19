@@ -19,7 +19,7 @@ const os = require('os');
 const path = require('path');
 const { loadDir } = require('./lib/data');
 const { Pool } = require('./lib/pool');
-const { GRID_SPACE, MOMENTUM_SPACE, gridCombos, randomCombos } = require('./lib/spaces');
+const { GRID_SPACE, MOMENTUM_SPACE, MOMENTUM_SELECTIVE_SPACE, gridCombos, randomCombos } = require('./lib/spaces');
 const { makeFolds, regimeOf, compound, neighbors, bootstrap, grade, CRITERIA, DAY } = require('./lib/stress-core');
 const { renderReportCard } = require('./lib/report-card');
 
@@ -49,7 +49,7 @@ async function main() {
   const trainDays = Number(a['train-days'] || 90);
   const testDays = Number(a['test-days'] || 30);
   const workers = Number(a.workers || Math.max(1, os.cpus().length - 1));
-  const space = bot === 'grid' ? GRID_SPACE : MOMENTUM_SPACE;
+  const space = bot === 'grid' ? GRID_SPACE : a.space === 'selective' ? MOMENTUM_SELECTIVE_SPACE : MOMENTUM_SPACE;
   const perDay = interval === '1h' ? 24 : interval === '15m' ? 96 : 288;
 
   const all = loadDir(dataDir, interval);

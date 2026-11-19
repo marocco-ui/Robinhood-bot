@@ -100,6 +100,7 @@ node bench/stress.js grid|momentum
     --cost, --data, --interval, --capital, --workers, --holdout-days   as above
     --train-days 90 --test-days 30 walk-forward window sizes
     --samples 100                  momentum: random settings tried per window
+    --space selective              momentum: pickier settings (big moves, few trades)
     --params FILE                  stress these exact settings instead of re-tuning
 node bench/final-exam.js grid|momentum [--data DIR] [--capital 1000] [--force]
 ```

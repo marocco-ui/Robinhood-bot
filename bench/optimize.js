@@ -3,17 +3,17 @@
 //   node bench/optimize.js grid
 //   node bench/optimize.js momentum --samples 300
 //   node bench/optimize.js grid --cost rh-v2          (compare Robinhood fee-tier routing)
-// Options: --data DIR  --interval 1h|5m  --cost rh-default|rh-v2|free  --train 0.7
+// Options: --data DIR  --interval 1h|5m  --cost rh-default|rh-v2|free  --train 0.7  --holdout-days 60
 //          --capital 1000  --samples N (momentum)  --min-trades N  --workers N  --top N
 // Writes bench/results/<bot>-<cost>-<date>.html (charts), .json, and <bot>-best.env
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Worker } = require('worker_threads');
 const { loadDir } = require('./lib/data');
 const { simulateGrid, simulateMomentum } = require('./lib/sim');
 const { GRID_SPACE, MOMENTUM_SPACE, gridCombos, randomCombos } = require('./lib/spaces');
 const { renderReport } = require('./lib/report');
+const { Pool } = require('./lib/pool');
 
 function parseArgs(argv) {
   const out = { bot: argv[0] };
@@ -26,37 +26,6 @@ function parseArgs(argv) {
 function score(stats, minTrades) {
   if ((stats.trades || 0) < minTrades) return -Infinity;
   return stats.returnPct - 0.5 * stats.maxDrawdownPct;
-}
-
-class Pool {
-  constructor(size, dataDir) {
-    this.workers = Array.from({ length: size }, () => new Worker(path.join(__dirname, 'lib', 'worker.js'), { workerData: { dataDir } }));
-    this.idle = [...this.workers];
-    this.queue = [];
-    this.pending = new Map();
-    this.nextId = 0;
-    for (const w of this.workers) {
-      w.on('message', (msg) => {
-        const done = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        this.idle.push(w);
-        this.pump();
-        done(msg);
-      });
-    }
-  }
-  run(job) {
-    return new Promise((resolve) => {
-      const id = this.nextId++;
-      this.pending.set(id, resolve);
-      this.queue.push({ ...job, id });
-      this.pump();
-    });
-  }
-  pump() {
-    while (this.idle.length && this.queue.length) this.idle.pop().postMessage(this.queue.shift());
-  }
-  close() { for (const w of this.workers) w.terminate(); }
 }
 
 function fmtDate(t) { return new Date(t).toISOString().slice(0, 10); }
@@ -76,18 +45,22 @@ async function main() {
   const minTrades = Number(a['min-trades'] || (bot === 'grid' ? 6 : 8));
   const top = Number(a.top || 15);
   const workers = Number(a.workers || Math.max(1, os.cpus().length - 1));
+  const holdoutDays = Number(a['holdout-days'] ?? 60);
 
   const all = loadDir(dataDir, interval);
   const series = bot === 'grid' ? { SOL: all.SOL } : all;
   if (bot === 'grid' && !all.SOL) throw new Error(`No SOL-${interval}.csv in ${dataDir}. Run: node bench/fetch-data.js`);
   if (bot === 'momentum' && Object.keys(all).filter((s) => s !== 'SOL').length === 0) throw new Error(`No coin data (*-${interval}.csv) in ${dataDir}. Run: node bench/fetch-data.js`);
-  let t0 = Infinity; let t1 = -Infinity;
-  for (const arr of Object.values(series)) { t0 = Math.min(t0, arr[0].t); t1 = Math.max(t1, arr[arr.length - 1].t); }
+  let t0 = Infinity; let dataEnd = -Infinity;
+  for (const arr of Object.values(series)) { t0 = Math.min(t0, arr[0].t); dataEnd = Math.max(dataEnd, arr[arr.length - 1].t); }
+  // The last `holdoutDays` are the sealed final exam (bench/final-exam.js). Never tune on them.
+  const t1 = dataEnd - holdoutDays * 86400000;
+  if (t1 - t0 < 30 * 86400000) throw new Error(`Only ${((t1 - t0) / 86400000).toFixed(0)} days left after the ${holdoutDays}-day holdout. Fetch more history: node bench/fetch-data.js --days 365`);
   const split = t0 + (t1 - t0) * trainFrac;
 
   const combos = bot === 'grid' ? [...gridCombos(GRID_SPACE)] : randomCombos(MOMENTUM_SPACE, Number(a.samples || 200), Number(a.seed || 1));
   console.log(`${bot}: ${combos.length} settings x ${Object.keys(series).length} series, cost model ${cost}, ${workers} workers`);
-  console.log(`train ${fmtDate(t0)} -> ${fmtDate(split)} | test ${fmtDate(split)} -> ${fmtDate(t1)}`);
+  console.log(`train ${fmtDate(t0)} -> ${fmtDate(split)} | test ${fmtDate(split)} -> ${fmtDate(t1)} | sealed final exam ${fmtDate(t1)} -> ${fmtDate(dataEnd)} (not used)`);
 
   const pool = new Pool(workers, dataDir);
   const opts = { cost, capital };
@@ -109,7 +82,7 @@ async function main() {
     return;
   }
 
-  const tested = await Promise.all(finalists.map((r) => pool.run({ bot, interval, params: r.params, opts: { ...opts, start: split, end: Infinity } })));
+  const tested = await Promise.all(finalists.map((r) => pool.run({ bot, interval, params: r.params, opts: { ...opts, start: split, end: t1 } })));
   pool.close();
   const rows = finalists.map((r, i) => {
     const t = tested[i];
@@ -124,17 +97,17 @@ async function main() {
     ? (o) => simulateGrid(series.SOL, pick.params, { cost, capital, ...o, sampleEvery: 1 })
     : (o) => simulateMomentum(series, pick.params, { cost, capital, ...o, sampleEvery: 6 });
   const trainRun = await sim({ start: t0, end: split });
-  const testRun = await sim({ start: split, end: Infinity });
+  const testRun = await sim({ start: split, end: t1 });
 
   const outDir = path.join(__dirname, 'results');
   fs.mkdirSync(outDir, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   const base = path.join(outDir, `${bot}-${cost}-${stamp}`);
-  const lastPrice = bot === 'grid' ? series.SOL[series.SOL.length - 1].c : null;
+  const lastPrice = bot === 'grid' ? series.SOL[series.SOL.length - 1].c : null; // latest price, for centering the live range
   const envText = bestEnv(bot, pick.params, { lastPrice, capital });
   const summary = {
     bot, cost, interval, capital, dataDir, generatedAt: new Date().toISOString(),
-    window: { start: t0, split, end: t1 }, combos: combos.length, failed, minTrades,
+    window: { start: t0, split, end: t1, holdoutEnd: dataEnd }, combos: combos.length, failed, minTrades,
     pick: { params: pick.params, train: pick.train, test: pick.test },
     finalists: rows,
     env: envText,
@@ -166,6 +139,7 @@ function bestEnv(bot, p, { lastPrice, capital }) {
     lines.push(`GRID_COUNT=${p.count}`);
     lines.push(`GRID_MAX_OPEN_BUYS=${p.maxOpenBuys}`);
     lines.push(`GRID_STOP_LOSS_PCT=${p.stopLossPct}`);
+    lines.push(`GRID_TREND_MA_HOURS=${p.trendMaHours || 0}`);
     lines.push(`# Bench used $${(capital / p.count).toFixed(2)} per slot on $${capital}. Scale both together.`);
     lines.push(`GRID_ORDER_USD=${(capital / p.count).toFixed(2)}`);
     lines.push(`GRID_MAX_CAPITAL_USD=${capital}`);

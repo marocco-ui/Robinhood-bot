@@ -36,10 +36,13 @@ const COSTS = {
 // Steps through a shared timeline. Each symbol's quote is its latest candle at or before the
 // current time. Orders placed at step i can only fill against candle i+1's range.
 class ReplayFeed {
-  constructor(series, { spreadBps = 190, start = 0, end = Infinity } = {}) {
+  // fillBufferBps: stress option. A resting order only fills if the candle trades that much
+  // further through its price (models queue position / partial fills going against you).
+  constructor(series, { spreadBps = 190, start = 0, end = Infinity, fillBufferBps = 0 } = {}) {
     this.symbols = Object.keys(series);
     this.series = series;
     this.half = spreadBps / 2 / 1e4;
+    this.buffer = fillBufferBps / 1e4;
     const times = new Set();
     for (const s of this.symbols) for (const c of series[s]) if (c.t >= start && c.t < end) times.add(c.t);
     this.timeline = [...times].sort((a, b) => a - b);
@@ -80,8 +83,8 @@ class ReplayFeed {
     const q = { symbol: `${base}-USD`, bid: c.c * (1 - this.half), ask: c.c * (1 + this.half), mid: c.c, ts: c.t };
     // Only the candle that just closed counts for matching resting orders.
     if (withRange && c.t === this.now()) {
-      q.low = c.l * (1 + this.half);   // lowest ask during the candle
-      q.high = c.h * (1 - this.half);  // highest bid during the candle
+      q.low = c.l * (1 + this.half + this.buffer);   // lowest ask during the candle
+      q.high = c.h * (1 - this.half - this.buffer);  // highest bid during the candle
     }
     return q;
   }

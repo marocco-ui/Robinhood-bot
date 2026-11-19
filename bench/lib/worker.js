@@ -13,12 +13,15 @@ function series(interval) {
 parentPort.on('message', async (job) => {
   try {
     let res;
+    const opts = { sampleEvery: 1e12, ...job.opts };
     if (job.bot === 'grid') {
-      res = await simulateGrid(series(job.interval).SOL, job.params, { ...job.opts, sampleEvery: 1e12 });
+      res = await simulateGrid(series(job.interval).SOL, job.params, opts);
     } else {
-      res = await simulateMomentum(series(job.interval), job.params, { ...job.opts, sampleEvery: 1e12 });
+      res = await simulateMomentum(series(job.interval), job.params, opts);
     }
-    parentPort.postMessage({ id: job.id, ok: true, params: job.params, stats: res.stats, cfg: res.cfg });
+    const msg = { id: job.id, ok: true, params: job.params, stats: res.stats, cfg: res.cfg };
+    if (job.detail) { msg.daily = res.daily; msg.curve = res.curve; }
+    parentPort.postMessage(msg);
   } catch (err) {
     parentPort.postMessage({ id: job.id, ok: false, params: job.params, error: err.message });
   }

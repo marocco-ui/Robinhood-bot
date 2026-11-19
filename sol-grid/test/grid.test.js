@@ -153,3 +153,25 @@ test('an order the exchange no longer knows about frees its slot after 3 misses'
   assert.notStrictEqual(slot.orderId, lostId, 'slot freed and re-ordered on 3rd');
   assert.strictEqual(slot.status, 'buying');
 });
+
+test('trend filter: pauses and cancels buys below the moving average, resumes above it', async () => {
+  const { engine, feed, broker } = await setup(155, { trendMaHours: 24 });
+  const t0 = Date.UTC(2026, 0, 1);
+  let now = t0;
+  engine.now = () => now;
+  engine.seedPrices(Array.from({ length: 24 }, (_, i) => [t0 - (24 - i) * 3600000, 170])); // MA ~170
+  await engine.tick(); // 155 < 170 -> blocked
+  assert.ok(engine.trend.blocked);
+  assert.strictEqual([...broker.orders.values()].filter((o) => o.side === 'buy' && o.state === 'open').length, 0);
+  // Price recovers well above the average over the next day.
+  for (let h = 1; h <= 30; h++) { now = t0 + h * 3600000; feed.set(185); await engine.tick(); }
+  assert.ok(!engine.trend.blocked);
+  assert.ok([...broker.orders.values()].some((o) => o.side === 'buy' && o.state === 'open'));
+});
+
+test('trend filter stays off (warming up) until it has enough history', async () => {
+  const { engine, broker } = await setup(155, { trendMaHours: 24 });
+  await engine.tick();
+  assert.ok(engine.trend.warming);
+  assert.ok([...broker.orders.values()].some((o) => o.side === 'buy' && o.state === 'open'));
+});

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Downloads historical candles for the bench. Run this in your own Terminal (needs internet).
-//   node bench/fetch-data.js                 -> SOL 1h + 5m, momentum coins 5m, last 120 days
+//   node bench/fetch-data.js                 -> SOL 1h + 5m, momentum coins 5m, last 365 days
 //   node bench/fetch-data.js --days 240
 //   node bench/fetch-data.js --symbols SOL,BONK --interval 5m
 // Sources: Coinbase public API first, Binance.US as a fallback. No API keys needed.
@@ -16,7 +16,7 @@ function parseArgs() {
   const a = process.argv.slice(2);
   const get = (k, d) => { const i = a.indexOf(`--${k}`); return i === -1 ? d : a[i + 1]; };
   return {
-    days: Number(get('days', 120)),
+    days: Number(get('days', 365)),
     symbols: get('symbols', null),
     interval: get('interval', null),
   };
@@ -100,7 +100,7 @@ async function main() {
     jobs.push(['SOL', '1h'], ['SOL', '5m']);
     for (const s of UNIVERSE) if (s !== 'SOL') jobs.push([s, '5m']);
   }
-  console.log(`Downloading ${jobs.length} series, ${days} days each. This takes a few minutes.`);
+  console.log(`Downloading ${jobs.length} series, ${days} days each. A year of 5m candles takes about 20 minutes.`);
   const results = [];
   for (const [s, iv] of jobs) {
     process.stdout.write(`${s} ${iv} ... `);

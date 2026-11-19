@@ -63,20 +63,24 @@ class Tracker {
   }
 }
 
-function costOf(name) {
+// Cost model by name, with optional overrides for stress tests (spreadBps, fee bps).
+function costOf(name, overrides = {}) {
   const c = COSTS[name];
   if (!c) throw new Error(`Unknown cost model ${name}. Use: ${Object.keys(COSTS).join(', ')}`);
-  return c;
+  const out = { ...c };
+  for (const k of ['spreadBps', 'makerFeeBps', 'takerFeeBps']) if (overrides[k] !== undefined) out[k] = overrides[k];
+  return out;
 }
 
 // ---------------- grid ----------------
 // params: { downPct, upPct, count, maxOpenBuys, stopLossPct, orderUsd, maxCapitalUsd }
 // The range is set relative to the price at the start of the window, like you'd do live.
-async function simulateGrid(candles, params, { cost = 'rh-default', start = 0, end = Infinity, capital = 1000, sampleEvery = 1 } = {}) {
-  const c = costOf(cost);
-  const feed = new ReplayFeed({ SOL: candles }, { spreadBps: c.spreadBps, start, end });
+async function simulateGrid(candles, params, { cost = 'rh-default', costOverrides, fillBufferBps = 0, start = 0, end = Infinity, capital = 1000, sampleEvery = 1 } = {}) {
+  const c = costOf(cost, costOverrides);
+  const feed = new ReplayFeed({ SOL: candles }, { spreadBps: c.spreadBps, start, end, fillBufferBps });
   if (!feed.step()) throw new Error('no candles in window');
   const startPrice = feed.candle('SOL').c;
+  const bidMult = 1 - c.spreadBps / 2 / 1e4;
   const cfg = {
     mode: 'paper',
     symbol: 'SOL-USD',
@@ -88,6 +92,8 @@ async function simulateGrid(candles, params, { cost = 'rh-default', start = 0, e
     maxCapitalUsd: params.maxCapitalUsd ?? capital,
     maxOpenBuys: params.maxOpenBuys ?? 4,
     stopLossPct: params.stopLossPct ?? 10,
+    trendMaHours: params.trendMaHours ?? 0,
+    trendBufferPct: params.trendBufferPct ?? 0,
     minSpacingPct: params.minSpacingPct ?? 0,
     cancelOnExit: false,
     statusEveryTicks: 1e12,
@@ -97,6 +103,12 @@ async function simulateGrid(candles, params, { cost = 'rh-default', start = 0, e
   const broker = new PaperBroker({ priceSource: feed, startingCash: capital, makerFeeBps: c.makerFeeBps, takerFeeBps: c.takerFeeBps });
   const engine = new GridEngine({ cfg, broker, log: rec.log, now: () => feed.now() });
   await engine.init();
+  if (cfg.trendMaHours) {
+    // Warm the moving average with the candles just before the window, like the live bot
+    // backfills from Coinbase on start.
+    const t = feed.now();
+    engine.seedPrices(candles.filter((k) => k.t < t && k.t >= t - cfg.trendMaHours * 3600000 * 1.25).map((k) => [k.t, k.c]));
+  }
 
   const curve = [];
   const priceCurve = [];
@@ -105,7 +117,7 @@ async function simulateGrid(candles, params, { cost = 'rh-default', start = 0, e
   do {
     await engine.tick();
     const price = feed.candle('SOL').c;
-    const equity = broker.cash + (broker.holdings.SOL || 0) * price;
+    const equity = broker.cash + (broker.holdings.SOL || 0) * price * bidMult; // held SOL is worth the bid, not the mid
     tracker.update(feed.now(), equity);
     if (n++ % sampleEvery === 0) {
       curve.push([feed.now(), equity]);
@@ -117,7 +129,7 @@ async function simulateGrid(candles, params, { cost = 'rh-default', start = 0, e
   // After a stop-loss halt the bot sits in cash; carry equity to the end of the window.
   while (feed.step()) {
     const price = feed.candle('SOL').c;
-    const equity = broker.cash + (broker.holdings.SOL || 0) * price;
+    const equity = broker.cash + (broker.holdings.SOL || 0) * price * bidMult; // held SOL is worth the bid, not the mid
     tracker.update(feed.now(), equity);
     if (n++ % sampleEvery === 0) { curve.push([feed.now(), equity]); priceCurve.push([feed.now(), price]); }
   }
@@ -129,6 +141,7 @@ async function simulateGrid(candles, params, { cost = 'rh-default', start = 0, e
     params,
     cfg: { lower: cfg.lower, upper: cfg.upper, count: cfg.gridCount, stepPct: +cfg.stepPct.toFixed(2), orderUsd: +cfg.orderUsd.toFixed(2) },
     levels: engine.levels,
+    daily: tracker.daily,
     stats: tracker.stats({
       roundTrips: engine.state.roundTrips,
       trades: rec.trades.length,
@@ -179,12 +192,12 @@ function momentumCfg(p, capital) {
   return cfg;
 }
 
-async function simulateMomentum(seriesBySymbol, params, { cost = 'rh-default', start = 0, end = Infinity, capital = 1000, intervalMs = 300000, sampleEvery = 12 } = {}) {
-  const c = costOf(cost);
+async function simulateMomentum(seriesBySymbol, params, { cost = 'rh-default', costOverrides, fillBufferBps = 0, start = 0, end = Infinity, capital = 1000, intervalMs = 300000, sampleEvery = 12 } = {}) {
+  const c = costOf(cost, costOverrides);
   const cfg = momentumCfg(params, capital);
   const series = {};
   for (const [s, arr] of Object.entries(seriesBySymbol)) if (!cfg.exclude.includes(s)) series[s] = arr;
-  const feed = new ReplayFeed(series, { spreadBps: c.spreadBps, start, end });
+  const feed = new ReplayFeed(series, { spreadBps: c.spreadBps, start, end, fillBufferBps });
   const signals = new CandleSignals(feed, intervalMs);
   const rec = recorder(() => feed.now());
   const broker = new PaperBroker({ priceSource: feed, startingCash: capital, makerFeeBps: c.makerFeeBps, takerFeeBps: c.takerFeeBps });
@@ -221,6 +234,7 @@ async function simulateMomentum(seriesBySymbol, params, { cost = 'rh-default', s
     bot: 'momentum',
     params,
     symbols: Object.keys(series),
+    daily: tracker.daily,
     stats: tracker.stats({
       trades: rec.exits.length,
       winRatePct: pnls.length ? +((wins.length / pnls.length) * 100).toFixed(1) : 0,

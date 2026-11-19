@@ -2,6 +2,55 @@
 // price with trade markers (grid), P&L by coin (momentum), finalist and trade tables.
 // Charts are SVG with a hover crosshair; light/dark follow the system setting.
 
+const STYLE = `.viz-root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);
+--s1:#2a78d6;--s2:#eb6834;--pos:#2a78d6;--neg:#e34948;--up:#006300;--down:#d03b3b}
+@media (prefers-color-scheme:dark){.viz-root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
+--s1:#3987e5;--s2:#d95926;--pos:#3987e5;--neg:#e66767;--up:#0ca30c;--down:#e66767}}
+*{box-sizing:border-box}body{margin:0}
+.viz-root{background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:28px;max-width:1000px;margin:0 auto;min-height:100vh}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:34px 0 4px}h3{font-size:14px;margin:0}.th{margin:18px 0 8px}
+.note,.sub{color:var(--ink2);margin:2px 0 12px}.sub{margin:2px 0 0;font-size:13px}
+.verdict{padding:12px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);margin:14px 0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:10px 0 14px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px}.tl{color:var(--ink2);font-size:12px}.tv{font-size:22px;font-weight:600;margin-top:2px}.tn{color:var(--muted);font-size:12px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 14px 6px;margin:0 0 14px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;color:var(--ink2);font-size:12px}.key{display:inline-flex;align-items:center;gap:6px}.sw{width:14px;height:3px;border-radius:2px;display:inline-block}
+.plot{position:relative}svg{width:100%;height:auto;display:block}
+.grid{stroke:var(--grid);stroke-width:1}.axis{stroke:var(--axis);stroke-width:1}.tick{fill:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.s1{stroke:var(--s1)}.s2{stroke:var(--s2)}.ink{stroke:var(--ink2);stroke-width:1.5}
+.s1-bg{background:var(--s1)}.s2-bg{background:var(--s2)}.ink-bg{background:var(--ink2)}
+.dlabel{font-size:12px;fill:var(--ink2)}.level{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 4;opacity:.7}
+.mark{stroke:var(--surface);stroke-width:1.5}.mark.buy{fill:var(--s1)}.mark.sell{fill:var(--s2)}
+.bar.pos{fill:var(--pos)}.bar.neg{fill:var(--neg)}.val{fill:var(--ink);font-size:12px;font-variant-numeric:tabular-nums}
+.cross{stroke:var(--muted);stroke-width:1}.hit{fill:transparent;cursor:crosshair}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 9px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);white-space:nowrap}
+.tip .d{color:var(--ink2);margin-bottom:2px}.tip i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:14px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--grid);font-variant-numeric:tabular-nums}th{color:var(--ink2);font-weight:600}
+.up{color:var(--up)}.down{color:var(--down)}code{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:12.5px}
+`;
+
+const HOVER_JS = `document.querySelectorAll('.plot').forEach(function (plot) {
+  var data = JSON.parse(plot.querySelector('script[type="application/json"]').textContent);
+  var svg = plot.querySelector('svg'), hit = plot.querySelector('.hit'), cross = plot.querySelector('.cross'), tip = plot.querySelector('.tip');
+  var M = data.M, W = data.W;
+  function money(v){var a=Math.abs(v);return (v<0?'-':'')+'$'+(a<1?a.toPrecision(3):a.toLocaleString('en-US',{maximumFractionDigits:2,minimumFractionDigits:2}));}
+  function nearest(pts, t){var lo=0,hi=pts.length-1;while(lo<hi){var m=(lo+hi)>>1;if(pts[m][0]<t)lo=m+1;else hi=m;}if(lo>0&&Math.abs(pts[lo-1][0]-t)<Math.abs(pts[lo][0]-t))lo--;return pts[lo];}
+  hit.addEventListener('mousemove', function (e) {
+    var r = svg.getBoundingClientRect(), sx = (e.clientX - r.left) * W / r.width;
+    var t = data.tMin + (sx - M.l) / (W - M.l - M.r) * (data.tMax - data.tMin);
+    cross.setAttribute('x1', sx); cross.setAttribute('x2', sx); cross.setAttribute('visibility', 'visible');
+    var rows = data.series.map(function (s) { var p = nearest(s.pts, t); return '<div><i style="background:var(--'+(s.cls==='ink'?'ink2':s.cls)+')"></i>'+s.name+' <b>'+money(p[1])+'</b></div>'; });
+    tip.innerHTML = '<div class="d">'+new Date(t).toISOString().slice(0,16).replace('T',' ')+'</div>'+rows.join('');
+    tip.hidden = false;
+    var px = e.clientX - plot.getBoundingClientRect().left;
+    tip.style.left = (px > plot.clientWidth - 190 ? px - 180 : px + 14) + 'px'; tip.style.top = '18px';
+  });
+  hit.addEventListener('mouseleave', function () { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+});
+`;
+
 const W = 920;
 const H = 300;
 const M = { l: 64, r: 92, t: 16, b: 34 };
@@ -212,34 +261,7 @@ function renderReport({ summary, trainRun, testRun, series }) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(bot)} bench, ${esc(cost)}</title>
 <style>
-.viz-root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);
---s1:#2a78d6;--s2:#eb6834;--pos:#2a78d6;--neg:#e34948;--up:#006300;--down:#d03b3b}
-@media (prefers-color-scheme:dark){.viz-root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
---s1:#3987e5;--s2:#d95926;--pos:#3987e5;--neg:#e66767;--up:#0ca30c;--down:#e66767}}
-*{box-sizing:border-box}body{margin:0}
-.viz-root{background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:28px;max-width:1000px;margin:0 auto;min-height:100vh}
-h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:34px 0 4px}h3{font-size:14px;margin:0}.th{margin:18px 0 8px}
-.note,.sub{color:var(--ink2);margin:2px 0 12px}.sub{margin:2px 0 0;font-size:13px}
-.verdict{padding:12px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);margin:14px 0}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:10px 0 14px}
-.tile{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px}.tl{color:var(--ink2);font-size:12px}.tv{font-size:22px;font-weight:600;margin-top:2px}.tn{color:var(--muted);font-size:12px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 14px 6px;margin:0 0 14px}
-.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;color:var(--ink2);font-size:12px}.key{display:inline-flex;align-items:center;gap:6px}.sw{width:14px;height:3px;border-radius:2px;display:inline-block}
-.plot{position:relative}svg{width:100%;height:auto;display:block}
-.grid{stroke:var(--grid);stroke-width:1}.axis{stroke:var(--axis);stroke-width:1}.tick{fill:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
-.line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.s1{stroke:var(--s1)}.s2{stroke:var(--s2)}.ink{stroke:var(--ink2);stroke-width:1.5}
-.s1-bg{background:var(--s1)}.s2-bg{background:var(--s2)}.ink-bg{background:var(--ink2)}
-.dlabel{font-size:12px;fill:var(--ink2)}.level{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 4;opacity:.7}
-.mark{stroke:var(--surface);stroke-width:1.5}.mark.buy{fill:var(--s1)}.mark.sell{fill:var(--s2)}
-.bar.pos{fill:var(--pos)}.bar.neg{fill:var(--neg)}.val{fill:var(--ink);font-size:12px;font-variant-numeric:tabular-nums}
-.cross{stroke:var(--muted);stroke-width:1}.hit{fill:transparent;cursor:crosshair}
-.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 9px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);white-space:nowrap}
-.tip .d{color:var(--ink2);margin-bottom:2px}.tip i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
-.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:14px}
-table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--grid);font-variant-numeric:tabular-nums}th{color:var(--ink2);font-weight:600}
-.up{color:var(--up)}.down{color:var(--down)}code{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
-pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;font-size:12.5px}
-</style></head><body><main class="viz-root">
+${STYLE}</style></head><body><main class="viz-root">
 <h1>${bot === 'grid' ? 'SOL grid bot' : 'Momentum bot'}: bench results</h1>
 <p class="note">Cost model <code>${esc(cost)}</code>, ${money(capital)} starting capital, ${summary.combos} settings tested. Training ${fmtDate(w.start)} to ${fmtDate(w.split)}, test ${fmtDate(w.split)} to ${fmtDate(w.end)}. Generated ${esc(summary.generatedAt.slice(0, 16).replace('T', ' '))} UTC.</p>
 <div class="verdict"><b>${held ? 'The picked settings made money on data they never saw.' : 'The picked settings did NOT make money on data they never saw.'}</b>
@@ -252,25 +274,7 @@ ${table(['#', 'Settings', 'Train', 'Train DD', 'Train trades', 'Test', 'Test DD'
 <p class="note">${esc(caveat)} Past results don't guarantee future ones.</p>
 </main>
 <script>
-document.querySelectorAll('.plot').forEach(function (plot) {
-  var data = JSON.parse(plot.querySelector('script[type="application/json"]').textContent);
-  var svg = plot.querySelector('svg'), hit = plot.querySelector('.hit'), cross = plot.querySelector('.cross'), tip = plot.querySelector('.tip');
-  var M = data.M, W = data.W;
-  function money(v){var a=Math.abs(v);return (v<0?'-':'')+'$'+(a<1?a.toPrecision(3):a.toLocaleString('en-US',{maximumFractionDigits:2,minimumFractionDigits:2}));}
-  function nearest(pts, t){var lo=0,hi=pts.length-1;while(lo<hi){var m=(lo+hi)>>1;if(pts[m][0]<t)lo=m+1;else hi=m;}if(lo>0&&Math.abs(pts[lo-1][0]-t)<Math.abs(pts[lo][0]-t))lo--;return pts[lo];}
-  hit.addEventListener('mousemove', function (e) {
-    var r = svg.getBoundingClientRect(), sx = (e.clientX - r.left) * W / r.width;
-    var t = data.tMin + (sx - M.l) / (W - M.l - M.r) * (data.tMax - data.tMin);
-    cross.setAttribute('x1', sx); cross.setAttribute('x2', sx); cross.setAttribute('visibility', 'visible');
-    var rows = data.series.map(function (s) { var p = nearest(s.pts, t); return '<div><i style="background:var(--'+(s.cls==='ink'?'ink2':s.cls)+')"></i>'+s.name+' <b>'+money(p[1])+'</b></div>'; });
-    tip.innerHTML = '<div class="d">'+new Date(t).toISOString().slice(0,16).replace('T',' ')+'</div>'+rows.join('');
-    tip.hidden = false;
-    var px = e.clientX - plot.getBoundingClientRect().left;
-    tip.style.left = (px > plot.clientWidth - 190 ? px - 180 : px + 14) + 'px'; tip.style.top = '18px';
-  });
-  hit.addEventListener('mouseleave', function () { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
-});
-</script></body></html>`;
+${HOVER_JS}</script></body></html>`;
 }
 
-module.exports = { renderReport };
+module.exports = { renderReport, lineChart, barChart, table, tile, esc, pct, money, fmtDate, STYLE, HOVER_JS };

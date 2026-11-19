@@ -47,6 +47,7 @@ async function main() {
   };
   engine.onPersist = persist;
   await engine.init();
+  if (cfg.trendMaHours) await seedTrend(engine, cfg, log);
   persist();
 
   if (args.has('--status')) {
@@ -121,6 +122,31 @@ async function main() {
       if (consecutiveErrors === 5) await alerts.send(`💥 Grid bot: 5 errors in a row. Last: ${err.message}`);
     }
     await new Promise((r) => setTimeout(r, Math.min(cfg.tickMs * 2 ** Math.min(consecutiveErrors, 4), 300000)));
+  }
+}
+
+// The trend filter needs N hours of prices. Instead of waiting days after a fresh start,
+// backfill hourly closes from Coinbase's public API (no key). If that fails, the filter
+// stays off until the bot has collected enough of its own samples.
+async function seedTrend(engine, cfg, log) {
+  const status = engine.trendStatus(Date.now(), 0);
+  if (!status.warming) return;
+  try {
+    const end = Date.now();
+    const start = end - (cfg.trendMaHours + 6) * 3600000;
+    const points = [];
+    for (let t = start; t < end; t += 300 * 3600000) {
+      const url = `https://api.exchange.coinbase.com/products/${cfg.symbol}/candles?granularity=3600` +
+        `&start=${new Date(t).toISOString()}&end=${new Date(Math.min(t + 300 * 3600000, end)).toISOString()}`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'sol-grid' }, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error(`Coinbase ${res.status}`);
+      for (const [time, , , , close] of await res.json()) points.push([time * 1000, close]);
+    }
+    points.sort((a, b) => a[0] - b[0]);
+    engine.seedPrices(points);
+    log.event('trend_seeded', { hours: cfg.trendMaHours, samples: points.length });
+  } catch (err) {
+    log.error('trend_seed_failed', err, { note: 'trend filter stays off until enough live samples' });
   }
 }
 

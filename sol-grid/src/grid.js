@@ -8,6 +8,10 @@
 // A filled buy flips the slot to selling one step up; a filled sell banks the step and the
 // slot goes back to idle, ready to buy again. Only the nearest `maxOpenBuys` idle slots below
 // the price get buy orders, and total exposure is capped at `maxCapitalUsd`.
+//
+// Trend filter (optional, trendMaHours > 0): when the price is below its N-hour moving
+// average (minus trendBufferPct), the grid stops buying and cancels resting buys, so it
+// doesn't keep catching a falling knife. Sells keep working. Buying resumes above the MA.
 const crypto = require('crypto');
 const { floorTo, roundTo } = require('../../shared/decimal');
 const { TERMINAL } = require('../../shared/brokers');
@@ -89,7 +93,35 @@ class GridEngine {
       fees: 0,
       dust: 0,
       halted: null,
+      trend: [],
     };
+  }
+
+  // ---------- trend filter ----------
+  // Hourly price samples, persisted with the state so restarts don't lose history.
+  recordPrice(t, price) {
+    if (!this.cfg.trendMaHours) return;
+    const tr = (this.state.trend = this.state.trend || []);
+    const last = tr[tr.length - 1];
+    if (last && t - last[0] < 3600000) return;
+    tr.push([t, price]);
+    const keepMs = this.cfg.trendMaHours * 3600000 * 1.25;
+    while (tr.length && tr[0][0] < t - keepMs) tr.shift();
+  }
+
+  seedPrices(points) {
+    for (const [t, p] of points) this.recordPrice(t, p);
+  }
+
+  trendStatus(now, price) {
+    const hours = this.cfg.trendMaHours;
+    if (!hours) return { enabled: false, blocked: false };
+    const from = now - hours * 3600000;
+    const pts = (this.state.trend || []).filter(([t]) => t >= from);
+    if (pts.length < hours * 0.8) return { enabled: true, warming: true, blocked: false, samples: pts.length, needed: Math.ceil(hours * 0.8) };
+    const ma = pts.reduce((a, [, p]) => a + p, 0) / pts.length;
+    const floor = ma * (1 - (this.cfg.trendBufferPct || 0) / 100);
+    return { enabled: true, warming: false, blocked: price < floor, ma: +ma.toFixed(4), floor: +floor.toFixed(4) };
   }
 
   // ---------- main loop step ----------
@@ -99,6 +131,13 @@ class GridEngine {
 
     await this.broker.sync();
     const quote = await this.broker.getQuote(this.cfg.symbol);
+    this.recordPrice(this.now(), quote.mid);
+    const trend = this.trendStatus(this.now(), quote.mid);
+    if (trend.blocked !== Boolean(this.trend && this.trend.blocked)) {
+      this.log.event(trend.blocked ? 'trend_block' : 'trend_clear', { price: quote.mid, ma: trend.ma });
+      if (trend.blocked) this.alerts.send(`📉 SOL below its ${this.cfg.trendMaHours}h average ($${trend.ma}). Grid paused buying.`, { silent: true });
+    }
+    this.trend = trend;
 
     await this.recoverPending();
     await this.updateOrders();
@@ -235,6 +274,15 @@ class GridEngine {
 
   async manageBuys(quote) {
     const price = quote.bid;
+    if (this.trend && this.trend.blocked) {
+      for (const s of this.state.slots) {
+        if (s.status === 'buying' && s.orderId) {
+          await this.broker.cancelOrder(s.orderId);
+          this.log.event('buy_cancel_trend', { slot: s.i, level: this.levels[s.i] });
+        }
+      }
+      return;
+    }
     const below = this.state.slots
       .filter((s) => this.levels[s.i] < price && (s.status === 'idle' || s.status === 'buying'))
       .sort((a, b) => this.levels[b.i] - this.levels[a.i]);
@@ -364,6 +412,7 @@ class GridEngine {
       realizedPnl: +this.state.realizedPnl.toFixed(2),
       roundTrips: this.state.roundTrips,
       committedUsd: +this.committedUsd().toFixed(2),
+      trend: this.trend && this.trend.enabled ? (this.trend.warming ? 'warming up' : this.trend.blocked ? `paused (below ${this.trend.ma})` : `ok (MA ${this.trend.ma})`) : 'off',
       slots: counts,
     };
   }

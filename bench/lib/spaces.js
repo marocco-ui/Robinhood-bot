@@ -3,8 +3,9 @@ const GRID_SPACE = {
   downPct: [10, 15, 20, 30, 40],      // range below the start price
   upPct: [10, 15, 20, 30, 40],        // range above the start price
   count: [4, 6, 8, 10, 12, 16],       // number of slots
-  maxOpenBuys: [3, 5],
+  maxOpenBuys: [4],
   stopLossPct: [0, 8, 15],            // % below the range bottom (0 = no stop)
+  trendMaHours: [0, 72, 240, 480],    // trend filter MA length (0 = off; 240h = 10 days)
 };
 
 const MOMENTUM_SPACE = {

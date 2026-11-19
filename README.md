@@ -35,12 +35,13 @@ cd sol-grid && npm test && cd ../solana-momentum && npm test && cd ..
 
 No Robinhood keys yet? Paper mode falls back to Coinbase public prices so you can still watch the bots run. Those prices don't include Robinhood's spread, so treat results as optimistic.
 
-## Tune on history first
+## Stress test on history first
 
 ```bash
-node bench/fetch-data.js            # download ~4 months of candles
-node bench/optimize.js grid         # report + bench/results/grid-best.env
-node bench/optimize.js momentum     # report + bench/results/momentum-best.env
+node bench/fetch-data.js --days 365          # download a year of candles
+node bench/stress.js grid                    # pass/fail report card
+node bench/stress.js momentum --samples 100
+node bench/final-exam.js grid                # only after a PASS, and only once
 ```
 
 See `bench/README.md` for how it works and what the results mean.

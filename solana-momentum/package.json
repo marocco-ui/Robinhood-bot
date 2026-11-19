@@ -1,0 +1,21 @@
+{
+  "name": "solana-momentum-bot",
+  "version": "2.0.0",
+  "description": "Momentum bot: DexScreener on-chain signals, Robinhood Crypto execution",
+  "main": "src/trader.js",
+  "private": true,
+  "scripts": {
+    "start": "node src/trader.js",
+    "scan": "node src/trader.js --scan-once",
+    "status": "node src/trader.js --status",
+    "liquidate": "node src/trader.js --liquidate",
+    "reset-halt": "node src/trader.js --reset-halt",
+    "test": "node --test test/*.test.js ../shared/test/*.test.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop solana-momentum-bot",
+    "pm2:logs": "pm2 logs solana-momentum-bot"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

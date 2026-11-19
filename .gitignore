@@ -1,0 +1,18 @@
+.env
+.env.*
+!.env.example
+*/data/
+*/logs/
+*.log
+node_modules/
+STOP
+.DS_Store
+bench/data/
+bench/data-synthetic/
+bench/results/
+# Keys and credentials, belt and braces
+.env.robinhood
+*.pem
+*.key
+*secret*
+*credential*

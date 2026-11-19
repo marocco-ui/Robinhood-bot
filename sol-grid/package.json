@@ -1,0 +1,24 @@
+{
+  "name": "sol-grid",
+  "version": "1.0.0",
+  "description": "SOL-USD grid bot on the Robinhood Crypto Trading API",
+  "main": "src/bot.js",
+  "private": true,
+  "scripts": {
+    "start": "node src/bot.js",
+    "status": "node src/bot.js --status",
+    "flatten": "node src/bot.js --flatten",
+    "cancel-all": "node src/bot.js --cancel-all",
+    "reset-halt": "node src/bot.js --reset-halt",
+    "candles": "node scripts/fetch-candles.js SOL-USD 3600 180",
+    "backtest": "node src/backtest.js data/candles-SOL-USD-3600s.csv",
+    "sweep": "node src/backtest.js data/candles-SOL-USD-3600s.csv --sweep",
+    "test": "node --test test/*.test.js ../shared/test/*.test.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop sol-grid",
+    "pm2:logs": "pm2 logs sol-grid"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}

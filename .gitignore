@@ -16,3 +16,4 @@ bench/results/
 *.key
 *secret*
 *credential*
+bench/stocks/data/

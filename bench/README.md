@@ -116,3 +116,13 @@ node --test bench/test/*.test.js
 ```
 
 Synthetic data is only for checking that the bench works. Never pick settings from it.
+
+## Stocks (`bench/stocks/run.js`)
+
+Tests monthly ETF strategies with the settings their authors published, so nothing is tuned on this data: hold SPY, trend (Faber 2007), dual momentum (Antonacci), and sector momentum. It reports yearly return, worst drop, return by market period (2008, 2020, 2022 and so on), every nearby setting, costs up to 0.5% per side, and the chance of trailing SPY over 5 years.
+
+```bash
+node bench/stocks/run.js [--start 2006-06-01] [--cost 5]
+```
+
+Daily prices from Robinhood live in `bench/stocks/data/` (Jan 2005 on, split-adjusted, no dividends). The trend strategy won on risk and became `stock-trend/`.

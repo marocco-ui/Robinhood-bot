@@ -1,0 +1,17 @@
+{
+  "name": "stock-trend",
+  "version": "1.0.0",
+  "description": "SPY trend bot (10-month average) on Robinhood's Trading MCP, no AI in the loop",
+  "main": "src/bot.js",
+  "private": true,
+  "scripts": {
+    "start": "node src/bot.js",
+    "once": "node src/bot.js --once",
+    "status": "node src/bot.js --status",
+    "test": "node --test test/*.test.js ../shared/test/*.test.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop stock-trend",
+    "pm2:logs": "pm2 logs stock-trend"
+  },
+  "engines": { "node": ">=18.17" }
+}

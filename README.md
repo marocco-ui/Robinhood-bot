@@ -35,6 +35,19 @@ cd sol-grid && npm test && cd ../solana-momentum && npm test && cd ..
 
 No Robinhood keys yet? Paper mode falls back to Coinbase public prices so you can still watch the bots run. Those prices don't include Robinhood's spread, so treat results as optimistic.
 
+## Stock trend bot (stock-trend/)
+
+Holds SPY above its 10-month average, else short-term Treasuries, in your Robinhood Agentic account. Trades through Robinhood's Trading MCP with no AI in the loop. See `stock-trend/README.md`.
+
+```bash
+node shared/scripts/rh-mcp-login.js
+cp stock-trend/.env.example stock-trend/.env
+node stock-trend/src/bot.js --status
+pm2 start stock-trend/ecosystem.config.js
+```
+
+`pm2 start ecosystem.config.js` in this folder starts all three bots. To run only the stock bot, use the command above.
+
 ## Stress test on history first
 
 ```bash

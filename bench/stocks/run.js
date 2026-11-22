@@ -60,7 +60,7 @@ function bootstrapVsHold(stratM, holdM, { months = 60, block = 6, sims = 3000 } 
 const results = {};
 const hold = simulate(P, STRATEGIES.hold, {}, { startDate: start, costBps });
 const holdM = monthly(hold.curve);
-for (const [name, strat] of Object.entries(STRATEGIES)) {
+for (const [name, strat] of Object.entries(STRATEGIES).filter(([n]) => ['hold', 'trend', 'gem', 'sectors'].includes(n))) {
   const run = name === 'hold' ? hold : simulate(P, strat, strat.params, { startDate: start, costBps });
   const s = stats(run.curve);
   const r = { params: strat.params, ...s, tradesPerYear: +(run.trades / s.years).toFixed(1), turnoverPerYear: +(run.turnover / s.years).toFixed(2) };

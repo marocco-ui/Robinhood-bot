@@ -7,8 +7,8 @@ function loadConfig() {
     risk: (process.env.STOCK_RISK_SYMBOL || 'SPY').toUpperCase(),
     safe: (process.env.STOCK_SAFE_SYMBOL || 'SHY').toUpperCase(),
     smaMonths: envNum('STOCK_SMA_MONTHS', 10),
-    capitalUsd: envNum('STOCK_CAPITAL_USD', 1000),     // most the bot will ever have invested
-    maxOrderUsd: envNum('STOCK_MAX_ORDER_USD', envNum('STOCK_CAPITAL_USD', 1000)),
+    capitalUsd: envNum('STOCK_CAPITAL_USD', 1000),     // most new money the bot puts in; its own profits are reinvested on top
+    maxOrderUsd: envNum('STOCK_MAX_ORDER_USD', envNum('STOCK_CAPITAL_USD', 1000)), // largest buy of new money
     minOrderUsd: envNum('STOCK_MIN_ORDER_USD', 1),
     cashReserveUsd: envNum('STOCK_CASH_RESERVE_USD', 1), // left uninvested so rounding never overdraws
     paperCashUsd: envNum('STOCK_PAPER_CASH_USD', 1000),

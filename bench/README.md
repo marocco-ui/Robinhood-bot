@@ -126,3 +126,9 @@ node bench/stocks/run.js [--start 2006-06-01] [--cost 5]
 ```
 
 Daily prices from Robinhood live in `bench/stocks/data/` (Jan 2005 on, split-adjusted, no dividends). The trend strategy won on risk and became `stock-trend/`.
+
+### Replay, synthetic markets, tuning (`bench/stocks/replay.js`, `synth.js`, `tune.js`)
+
+- `node bench/stocks/replay.js` runs 20 years of daily prices through the **real** stock-trend code (TrendEngine + PaperBroker), one trading day at a time, in about a tenth of a second. It caught a capital-cap bug that kept profits from compounding (4.84% a year instead of 6.55%).
+- `synth.js` makes alternate histories from random 6- or 12-month chunks of real days (all funds on the same days) and handmade scenarios: COVID-like V, 2008-like bear, 2022-like bleed, whipsaw, melt-up, lost decade.
+- `node bench/stocks/tune.js` tests rule changes against bars written down before running: better Sharpe in 3 of 4 five-year stretches, better in 60% of 500 synthetic histories at both chunk sizes, median worst drop at most 3 points deeper, CAGR at most 0.5 points lower. Nothing passed on Nov 22 2026, so the live rule stays SPY trend 10 months.

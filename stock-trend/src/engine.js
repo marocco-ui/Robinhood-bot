@@ -51,6 +51,7 @@ class TrendEngine {
       if (!TERMINAL.has(o.state)) return { action: 'waiting', order: p.orderId, state: o.state };
       this.log.event('order_done', { symbol: p.symbol, side: p.side, state: o.state, qty: o.filledQty, price: o.avgPrice });
       if (o.state === 'filled' && o.filledQty > 0) {
+        this.account(p.side, o.filledQty * o.avgPrice);
         this.log.trade({ mode: this.cfg.mode, symbol: p.symbol, side: p.side, type: 'market', qty: o.filledQty, price: o.avgPrice, reason: p.reason, orderId: p.orderId });
         await this.alert(`${p.side === 'buy' ? 'Bought' : 'Sold'} ${o.filledQty} ${p.symbol} at $${o.avgPrice}`);
       } else {
@@ -74,16 +75,34 @@ class TrendEngine {
       }
     }
 
-    // 2. Buy the target with settled cash, up to the capital cap.
+    // 2. Buy the target with settled cash. Money from the bot's own sales is always reinvested;
+    //    new money from the account is limited to STOCK_CAPITAL_USD in total.
     const [bp, price] = await Promise.all([this.broker.buyingPower(), this.broker.price(sig.target)]);
     const targetValue = ((held[sig.target] && held[sig.target].quantity) || 0) * price;
-    const room = this.cfg.capitalUsd - targetValue;
-    const spend = Math.floor(Math.min(bp - this.cfg.cashReserveUsd, room, this.cfg.maxOrderUsd) * 100) / 100;
+    if (this.state.contributed === undefined) {
+      // First run, or a state file from before this was tracked: count what's already invested.
+      this.state.contributed = Math.min(this.cfg.capitalUsd, targetValue);
+      this.state.earmarked = this.state.earmarked || 0;
+      this.saveState(this.state);
+    }
+    const newMoney = Math.max(0, Math.min(this.cfg.capitalUsd - this.state.contributed, this.cfg.maxOrderUsd));
+    const spend = Math.floor(Math.min(bp - this.cfg.cashReserveUsd, (this.state.earmarked || 0) + newMoney) * 100) / 100;
     await this.dailyStatus({ sig, bp, targetValue, held });
     if (spend >= this.cfg.minOrderUsd) {
       return this.place({ side: 'buy', symbol: sig.target, dollarAmount: spend, reason: `trend says ${sig.target}` });
     }
     return { action: 'hold', target: sig.target };
+  }
+
+  // Track where buy money comes from: the bot's own sale proceeds first, then new money.
+  account(side, amount) {
+    if (side === 'sell') {
+      this.state.earmarked = (this.state.earmarked || 0) + amount;
+    } else {
+      const fromSales = Math.min(amount, this.state.earmarked || 0);
+      this.state.earmarked = (this.state.earmarked || 0) - fromSales;
+      this.state.contributed = (this.state.contributed || 0) + (amount - fromSales);
+    }
   }
 
   async place(p) {

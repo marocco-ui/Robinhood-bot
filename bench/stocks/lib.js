@@ -89,6 +89,47 @@ const STRATEGIES = {
   },
 };
 
+// Trend with a buffer: once in, stay until price falls bufferPct below the average; once out,
+// wait until it rises bufferPct above. Cuts flip-flopping when price hugs the average.
+STRATEGIES.trendBuffer = {
+  params: { smaMonths: 10, bufferPct: 2 },
+  space: { smaMonths: [10], bufferPct: [1, 2, 3, 5] },
+  fn: (P, i, p, current) => {
+    const m = sma(P, 'SPY', i, p.smaMonths);
+    if (m === null) return null;
+    const px = P.close.SPY[i];
+    const inRisk = current ? Boolean(current.SPY) : px > m;
+    const b = p.bufferPct / 100;
+    if (inRisk) return px < m * (1 - b) ? { SHY: 1 } : { SPY: 1 };
+    return px > m * (1 + b) ? { SPY: 1 } : { SHY: 1 };
+  },
+};
+
+// Faber-style multi-asset trend: equal slices of several assets, each held only while above its
+// own moving average; a slice that's below goes to T-bills (SHY).
+STRATEGIES.multi = {
+  params: { smaMonths: 10, assets: ['SPY', 'EFA', 'IEF', 'GLD'] },
+  space: { smaMonths: [8, 10, 12], assets: [['SPY', 'EFA', 'IEF', 'GLD']] },
+  fn: (P, i, p) => {
+    const w = {};
+    for (const a of p.assets) {
+      const m = sma(P, a, i, p.smaMonths);
+      if (m === null) return null;
+      const k = P.close[a][i] > m ? a : 'SHY';
+      w[k] = (w[k] || 0) + 1 / p.assets.length;
+    }
+    return w;
+  },
+};
+
+// Same four assets, always held in equal slices (rebalanced when nothing else trades): the
+// "diversification alone" baseline, to see what the trend filter adds on top.
+STRATEGIES.mix = {
+  params: { assets: ['SPY', 'EFA', 'IEF', 'GLD'] },
+  space: {},
+  fn: (P, i, p) => Object.fromEntries(p.assets.map((a) => [a, 1 / p.assets.length])),
+};
+
 // ---------- simulation ----------
 // Rebalances at the open after each month end. costBps is charged on the value traded, each side.
 function simulate(P, strat, params, { startDate, endDate, costBps = 5, capital = 10000 } = {}) {
@@ -130,7 +171,7 @@ function simulate(P, strat, params, { startDate, endDate, costBps = 5, capital =
     const eq = cash + Object.entries(shares).reduce((v, [s, q]) => v + q * close[s][i], 0);
     curve.push([dates[i], eq]);
     if (isMonthEnd.has(i) && i < end - 1) {
-      const w = strat.fn(P, i, params);
+      const w = strat.fn(P, i, params, target);
       if (w && JSON.stringify(w) !== JSON.stringify(target)) { pending = w; target = w; }
       else if (w && !Object.keys(shares).length) pending = w;
     }
@@ -185,4 +226,4 @@ function combos(space) {
   return out;
 }
 
-module.exports = { loadPrices, STRATEGIES, simulate, stats, yearly, combos, SECTORS };
+module.exports = { loadPrices, STRATEGIES, simulate, stats, yearly, combos, SECTORS, sma };

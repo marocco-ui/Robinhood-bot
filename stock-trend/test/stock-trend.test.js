@@ -164,3 +164,32 @@ test('McpBroker parses real Robinhood replies and sends correct order arguments'
   replies.review_equity_order = { data: { order_checks: [{ message: 'Insufficient buying power' }] } };
   assert.deepStrictEqual((await b.review({ symbol: 'SPY', side: 'buy', dollarAmount: 9e9 })).checks, ['Insufficient buying power']);
 });
+
+test('capital cap limits new money, but sale proceeds are reinvested in full', async () => {
+  // Start holding $1,400 of SPY bought with $1,000 of new money; the trend flips to SHY.
+  const r = rig({ closes: DOWN, cash: 3000, positions: { SPY: 2 } });
+  r.engine.state.contributed = 1000;
+  r.engine.state.earmarked = 0;
+  await r.engine.tick(); // sell 2 SPY at the bid
+  await r.engine.tick(); // fill
+  assert.ok(Math.abs(r.engine.state.earmarked - 2 * 699.9) < 1e-6);
+  r.advance(864e5);
+  const b = await r.engine.tick();
+  assert.deepStrictEqual([b.action, b.side, b.symbol], ['placed', 'buy', 'SHY']);
+  await r.engine.tick();
+  // Spent the $1,399.80 of proceeds (not capped at $1,000), and no new money beyond the cap.
+  assert.ok(Math.abs(r.paper.positions.SHY * 81.01 - 1399.8) < 0.02, `SHY value ${r.paper.positions.SHY * 81.01}`);
+  assert.ok(r.engine.state.earmarked < 0.01);
+  assert.strictEqual(r.engine.state.contributed, 1000);
+  assert.strictEqual((await r.engine.tick()).action, 'hold');
+});
+
+test('state from before the cap fix: counts what is already invested', async () => {
+  const r = rig({ closes: UP, cash: 50, positions: { SPY: 1.4 } });
+  // 1.4 SPY at $700 = $980 already in, so only $20 of new money is allowed (minus the $1 reserve check).
+  const a = await r.engine.tick();
+  assert.ok(Math.abs(r.engine.state.contributed - 980) < 1e-9);
+  assert.strictEqual(a.action, 'placed');
+  await r.engine.tick();
+  assert.ok(Math.abs(r.paper.positions.SPY - 1.4 - 20 / 700.1) < 1e-4);
+});
